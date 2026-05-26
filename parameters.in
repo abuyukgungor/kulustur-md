@@ -1,0 +1,69 @@
+# Configuration Parameters
+# You can change these values to set your preferred parameters.
+# If you press Enter on any prompt, the program will use these values.
+
+# General Settings
+topology = h2h3mono.top
+trajectory = traj.in
+output_dir = analysis
+dimension = 2
+temperature = 310.0
+kB = 0.001987
+
+# FEL Plotting Settings
+energy_threshold_3d = auto
+bins_1d = 50
+bins_2d = 50
+bins_3d = 30
+
+# PCA Settings
+pca_mask = @CA
+pca_modes_visualize = 4
+
+# RMSD Settings
+rmsd_mask = @CA
+rmsd_reference = average
+
+# Radius of Gyration Settings
+rg_mask = @CA
+
+# SASA Settings
+sasa_mask = !@H*
+
+# HBOND Settings
+hbond_mask = :1-auto
+hbond_distance = 3.0
+hbond_angle = 135.0
+
+# Distance Settings
+distance1_mask1 = :1@CA
+distance1_mask2 = auto
+distance2_mask1 = :1@CA
+distance2_mask2 = auto
+
+# SECSTRUCT Settings
+secstruct_res = 1-auto
+secstruct_type = total
+
+# DIHEDRAL Settings
+dihedral_mask1 = :1-13@CA
+dihedral_mask2 = :14@CA
+dihedral_mask3 = :49@CA
+dihedral_mask4 = :50-auto@CA
+
+# Plot Customization Settings
+plot_title = Free Energy Landscape ({dir_name})
+label_pc1 = PC1
+label_pc2 = PC2
+label_pc3 = PC3
+label_rmsd = RMSD
+label_rg = Rg
+label_sasa = SASA
+label_hbond = HBonds
+label_dihedral = Dihedral Angle (deg)
+label_secstruct = Secondary Structure Fraction
+label_distance1 = Distance 1
+label_distance2 = Distance 2
+color_1d = #1f77b4
+colormap_2d = viridis
+colormap_3d = Jet
