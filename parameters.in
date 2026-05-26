@@ -15,6 +15,7 @@ energy_threshold_3d = auto
 bins_1d = 50
 bins_2d = 50
 bins_3d = 30
+plot_format_3d = html
 
 # PCA Settings
 pca_mask = @CA
@@ -66,4 +67,4 @@ label_distance1 = Distance 1
 label_distance2 = Distance 2
 color_1d = #1f77b4
 colormap_2d = viridis
-colormap_3d = Jet
+colormap_3d = jet

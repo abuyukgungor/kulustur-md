@@ -14,9 +14,24 @@ def load_parameters():
         'color_1d': '#1f77b4',
         'colormap_2d': 'viridis',
         'colormap_3d': 'Jet',
-        'plot_title': 'Free Energy Landscape ({dir_name})'
+        'plot_title': 'Free Energy Landscape ({dir_name})',
+        'plot_format_3d': 'html'
     }
-    config_file = os.path.join(SCRIPT_DIR, 'parameters.in')
+    
+    config_file = None
+    if "--config" in sys.argv:
+        try:
+            idx = sys.argv.index("--config")
+            if idx + 1 < len(sys.argv):
+                config_file = sys.argv[idx + 1]
+        except Exception:
+            pass
+            
+    if config_file is None:
+        config_file = os.path.join(SCRIPT_DIR, 'parameters.in')
+        
+    config_file = os.path.abspath(config_file)
+    
     if os.path.exists(config_file):
         try:
             with open(config_file, 'r') as f:
@@ -47,6 +62,19 @@ def load_parameters():
 def get_custom_label(var_label, defaults):
     key = f"label_{var_label.lower().strip()}"
     return defaults.get(key, var_label)
+
+def resolve_colormap(name, default='viridis'):
+    import matplotlib as mpl
+    name_clean = str(name).strip()
+    if hasattr(mpl, 'colormaps'):
+        available_cmaps = list(mpl.colormaps.keys())
+    else:
+        available_cmaps = plt.colormaps()
+    cmap_lower = name_clean.lower()
+    for c in available_cmaps:
+        if c.lower() == cmap_lower:
+            return c
+    return default
 
 DEFAULTS = load_parameters()
 kB = DEFAULTS['kB']
@@ -175,7 +203,7 @@ def plot_2d(file1, file2, label1, label2, output_image, T=310.0):
     # 2D Plotting
     plt.figure(figsize=(9, 7.5))
     levels = np.linspace(0, np.nanmax(G), 50)
-    cmap2d = DEFAULTS.get('colormap_2d', 'viridis')
+    cmap2d = resolve_colormap(DEFAULTS.get('colormap_2d', 'viridis'), 'viridis')
     cf = plt.contourf(X, Y, G.T, levels=levels, cmap=cmap2d)
     
     # Add energy contour lines (from 0.5 to 10 kcal/mol, step size 1.0)
@@ -209,12 +237,7 @@ def plot_2d(file1, file2, label1, label2, output_image, T=310.0):
     plt.close()
     print(f"--> Plot saved successfully: {output_image}")
 
-def plot_3d(file1, file2, file3, label1, label2, label3, output_html, T=310.0, threshold='auto'):
-    try:
-        import plotly.graph_objects as go
-    except ImportError:
-        raise ImportError("plotly library is required for 3D plotting! Please install it using: pip install plotly")
-        
+def plot_3d(file1, file2, file3, label1, label2, label3, output_path, T=310.0, threshold='auto', fmt='html'):
     print(f"--> Loading 3D data: {file1}, {file2}, {file3}...")
     x = load_data(file1)
     y = load_data(file2)
@@ -298,49 +321,98 @@ def plot_3d(file1, file2, file3, label1, label2, label3, output_html, T=310.0, t
     Z_plot = Z[mask]
     G_plot = G[mask]
     
-    print("--> Generating interactive 3D HTML plot (Plotly)...")
-    fig = go.Figure(data=[go.Scatter3d(
-        x=X_plot,
-        y=Y_plot,
-        z=Z_plot,
-        mode='markers',
-        marker=dict(
-            size=5,
-            color=G_plot,
-            colorscale=DEFAULTS.get('colormap_3d', 'Jet'),
-            opacity=0.8,
-            colorbar=dict(title='ΔG (kcal/mol)')
-        )
-    )])
+    base_path, ext = os.path.splitext(output_path)
     
-    dir_name = os.path.basename(os.path.dirname(os.path.abspath(output_html)))
-    # Resolve custom plot title
-    title_tmpl = DEFAULTS.get('plot_title', 'Free Energy Landscape ({dir_name})')
-    try:
-        resolved_title = title_tmpl.format(dir_name=dir_name)
-    except Exception:
-        resolved_title = title_tmpl
+    # 1. HTML generation using Plotly
+    if fmt in ['html', 'both']:
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            raise ImportError("plotly library is required for 3D HTML plotting! Please install it using: pip install plotly")
+            
+        print("--> Generating interactive 3D HTML plot (Plotly)...")
+        fig = go.Figure(data=[go.Scatter3d(
+            x=X_plot,
+            y=Y_plot,
+            z=Z_plot,
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=G_plot,
+                colorscale=DEFAULTS.get('colormap_3d', 'Jet'),
+                opacity=0.8,
+                colorbar=dict(title='ΔG (kcal/mol)')
+            )
+        )])
         
-    fig.update_layout(
-        title=dict(
-            text=resolved_title,
-            x=0.5,
-            y=0.95,
-            font=dict(size=16, color='black', family='Arial')
-        ),
-        scene=dict(
-            xaxis_title=get_custom_label(label1, DEFAULTS),
-            yaxis_title=get_custom_label(label2, DEFAULTS),
-            zaxis_title=get_custom_label(label3, DEFAULTS)
-        ),
-        margin=dict(l=0, r=0, b=40, t=60)
-    )
-    
-    fig.write_html(output_html)
-    print(f"--> Interactive 3D plot saved successfully: {output_html}")
+        dir_name = os.path.basename(os.path.dirname(os.path.abspath(output_path)))
+        title_tmpl = DEFAULTS.get('plot_title', 'Free Energy Landscape ({dir_name})')
+        try:
+            resolved_title = title_tmpl.format(dir_name=dir_name)
+        except Exception:
+            resolved_title = title_tmpl
+            
+        fig.update_layout(
+            title=dict(
+                text=resolved_title,
+                x=0.5,
+                y=0.95,
+                font=dict(size=16, color='black', family='Arial')
+            ),
+            scene=dict(
+                xaxis_title=get_custom_label(label1, DEFAULTS),
+                yaxis_title=get_custom_label(label2, DEFAULTS),
+                zaxis_title=get_custom_label(label3, DEFAULTS)
+            ),
+            margin=dict(l=0, r=0, b=40, t=60)
+        )
+        
+        html_out = base_path + ".html"
+        fig.write_html(html_out)
+        print(f"--> Interactive 3D plot saved successfully: {html_out}")
+        
+    # 2. PNG generation using Matplotlib 3D scatter
+    if fmt in ['png', 'both']:
+        print("--> Generating static 3D PNG plot (Matplotlib)...")
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        cmap_name = resolve_colormap(DEFAULTS.get('colormap_3d', 'jet'), 'jet')
+        sc = ax.scatter(X_plot, Y_plot, Z_plot, c=G_plot, cmap=cmap_name, alpha=0.7, marker='o')
+        
+        cbar = fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.1)
+        cbar.set_label('ΔG (kcal/mol)', fontsize=11, fontweight='bold')
+        
+        ax.set_xlabel(get_custom_label(label1, DEFAULTS), fontsize=11, fontweight='bold', labelpad=10)
+        ax.set_ylabel(get_custom_label(label2, DEFAULTS), fontsize=11, fontweight='bold', labelpad=10)
+        ax.set_zlabel(get_custom_label(label3, DEFAULTS), fontsize=11, fontweight='bold', labelpad=10)
+        
+        dir_name = os.path.basename(os.path.dirname(os.path.abspath(output_path)))
+        title_tmpl = DEFAULTS.get('plot_title', 'Free Energy Landscape ({dir_name})')
+        try:
+            resolved_title = title_tmpl.format(dir_name=dir_name)
+        except Exception:
+            resolved_title = title_tmpl
+            
+        plt.title(resolved_title, fontsize=13, fontweight='bold', pad=15)
+        
+        png_out = base_path + ".png"
+        plt.savefig(png_out, dpi=300)
+        plt.close()
+        print(f"--> Static 3D plot saved successfully: {png_out}")
 
 def main():
     args = sys.argv[1:]
+    
+    # Extract config if provided via --config to prevent it interfering with positional arguments
+    if "--config" in args:
+        try:
+            idx = args.index("--config")
+            if idx + 1 < len(args):
+                del args[idx + 1]
+            del args[idx]
+        except Exception:
+            pass
     
     # Extract temperature if provided via --temp
     temp = 310.0
@@ -363,6 +435,16 @@ def main():
                 del args[idx:idx+2]
         except Exception:
             pass
+    # Extract format if provided via --format
+    fmt = "html"
+    if "--format" in args:
+        try:
+            idx = args.index("--format")
+            if idx + 1 < len(args):
+                fmt = args[idx + 1].lower().strip()
+                del args[idx:idx+2]
+        except Exception:
+            pass
             
     try:
         if len(args) == 3:
@@ -373,13 +455,13 @@ def main():
             plot_2d(args[0], args[1], args[2], args[3], args[4], T=temp)
         elif len(args) == 7:
             # 3D: file1, file2, file3, label1, label2, label3, output
-            plot_3d(args[0], args[1], args[2], args[3], args[4], args[5], args[6], T=temp, threshold=threshold)
+            plot_3d(args[0], args[1], args[2], args[3], args[4], args[5], args[6], T=temp, threshold=threshold, fmt=fmt)
         else:
             print("Error: Invalid arguments.")
             print("Usage:")
             print("  1D: python plot_fel.py <file1> <label1> <out>")
             print("  2D: python plot_fel.py <file1> <file2> <label1> <label2> <out>")
-            print("  3D: python plot_fel.py <file1> <file2> <file3> <label1> <label2> <label3> <out>")
+            print("  3D: python plot_fel.py <file1> <file2> <file3> <label1> <label2> <label3> <out> [--format html|png|both]")
             sys.exit(1)
     except Exception as e:
         print(f"Error: {e}")

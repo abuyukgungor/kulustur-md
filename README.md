@@ -42,6 +42,7 @@ All defaults are loaded from the **`parameters.in`** file in the project directo
 | `output_dir` | Default directory to save output files and plots | `analysis` |
 | `temperature` | Temperature in Kelvin used for FEL calculation | `310.0` |
 | `energy_threshold_3d` | Maximum energy cutoff shown in 3D plots | `auto` (Dynamic estimation) |
+| `plot_format_3d` | Output format for 3D FEL plots (`html`, `png`, or `both`) | `html` |
 | `pca_mask` | Atom mask used for PCA coordinate calculation | `@CA` |
 | `pca_modes_visualize` | Number of PCA modes to calculate displacement trajectories for | `4` |
 | `hbond_distance` | Cutoff distance for hydrogen bond acceptance (Å) | `3.0` |
@@ -54,10 +55,17 @@ All defaults are loaded from the **`parameters.in`** file in the project directo
 ## Usage
 
 ### 1. Interactive Execution
-Run the following command to start the analysis suite. You will be prompted to enter the output directory, dimensions, temperature, and target variables. Press **Enter** to accept the defaults from `parameters.in`:
+Run the following command to start the analysis suite. You will be prompted to enter the output directory, dimensions, temperature, and target variables. Press **Enter** to accept the defaults:
 ```bash
-python3 main.py
+# Using the global default parameters.in from the installation folder:
+python main.py
+
+# Using a custom local configuration file:
+python main.py -p local_parameters.in
 ```
+
+> [!NOTE]
+> If no parameter file is specified using `-p` or `--params`, the program strictly falls back to the global `parameters.in` located in the script's directory. It does not automatically load a `parameters.in` in your current working directory.
 
 ### 2. HPC Batch Job Execution with Slurm
 For cluster queuing systems, you can submit jobs using the **Here Document (`<<EOF`)** approach to feed interactive inputs automatically in batch mode. Here is a sample Slurm submission script:
@@ -78,7 +86,7 @@ cd $SLURM_SUBMIT_DIR
 module load python/3.9
 
 # Run the program feeding inputs automatically
-python3 main.py <<EOF
+python main.py <<EOF
 analysis                          # Output directory
 2                                 # Dimensions (1, 2, or 3)
 310.0                             # Temperature (Kelvin)
@@ -88,6 +96,11 @@ RMSD                              # Variable 1
 RG                                # Variable 2
 EOF
 ```
+
+## PCA Mode Displacement Outputs
+
+When running PCA projections, the suite automatically calculates displacement pseudo-trajectories for the major eigenvectors to visualize molecular motions:
+- **`mode{i}.out`**: Pseudo-trajectory files (generated inside your output directory) representing the molecular displacement along the $i$-th eigenvector. The number of modes to calculate is controlled by the `pca_modes_visualize` parameter in `parameters.in` (defaults to `4`). These files can be read by visualization tools (like VMD or PyMOL) to animate the directional motion of each mode.
 
 ---
 

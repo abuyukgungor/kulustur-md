@@ -11,46 +11,47 @@ def check_file(filepath, description):
 
 def get_last_residue_index(topology_path):
     try:
-        # Run parminfo and resinfo to get both summary and detail
+        # Run resinfo command in cpptraj to inspect residue table
         result = subprocess.run(
             ["cpptraj", "-p", topology_path],
-            input="parminfo\nresinfo\nexit\n",
+            input="resinfo\nexit\n",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             check=True
         )
         
-        # Method 1: Look for "Total residues:" or "Residues:" in the output
-        for line in result.stdout.splitlines():
-            line_clean = line.strip().lower()
-            # Handle "total residues: 60" or "residues: 60"
-            for marker in ["total residues:", "residues:"]:
-                if marker in line_clean:
-                    parts = line_clean.split(marker)
-                    if len(parts) > 1:
-                        val_str = parts[1].strip().split()[0]
-                        # Remove any non-digit chars (e.g. punctuation)
-                        val_digits = ''.join(c for c in val_str if c.isdigit())
-                        if val_digits:
-                            return int(val_digits)
-                            
-        # Method 2: Fallback to parsing the resinfo table (first column is residue index)
-        last_res = 1
-        found_table_val = False
+        # Common solvent and ion residue names to skip
+        solvent_ions = {
+            'wat', 'hoh', 'tip3', 'tip', 'sol', 'spc', 'tp3', 't3p', 'h2o',
+            'na', 'cl', 'k', 'mg', 'ca', 'zn', 'na+', 'cl-', 'k+', 'mg2+', 'ca2+', 'zn2+',
+            'sod', 'cla', 'pot', 'cal', 'mg+', 'cs', 'cs+', 'rb', 'rb+', 
+            'li', 'li+', 'f', 'f-', 'br', 'br-', 'i', 'i-',
+            'so4', 'po4', 'act', 'dms', 'gol', 'peg'
+        }
+        
+        last_res = None
+        absolute_last_res = None
+        
         for line in result.stdout.splitlines():
             line = line.strip()
             if not line or line.startswith('#') or 'Residue' in line or '---' in line:
                 continue
             parts = line.split()
             if parts and parts[0].isdigit():
-                val = int(parts[0])
-                if val > last_res:
-                    last_res = val
-                    found_table_val = True
+                try:
+                    res_num = int(parts[0])
+                    res_name = parts[1].lower().strip()
+                    absolute_last_res = res_num
+                    if res_name not in solvent_ions:
+                        last_res = res_num
+                except (ValueError, IndexError):
+                    continue
                     
-        if found_table_val:
+        if last_res is not None:
             return last_res
+        if absolute_last_res is not None:
+            return absolute_last_res
             
         return None
     except Exception:
@@ -371,6 +372,7 @@ def load_parameters():
         'bins_1d': 50,
         'bins_2d': 50,
         'bins_3d': 30,
+        'plot_format_3d': 'html',
         'pca_mask': '@CA',
         'pca_modes_visualize': 4,
         'rmsd_mask': '@CA',
@@ -391,7 +393,29 @@ def load_parameters():
         'distance2_mask2': 'auto',
         'rmsd_reference': 'average'
     }
-    config_file = os.path.join(SCRIPT_DIR, 'parameters.in')
+    
+    config_file = None
+    explicitly_passed = False
+    args = sys.argv[1:]
+    
+    for flag in ["-p", "--params"]:
+        if flag in args:
+            try:
+                idx = args.index(flag)
+                if idx + 1 < len(args):
+                    config_file = args[idx + 1]
+                    explicitly_passed = True
+            except Exception:
+                pass
+            break
+            
+    if config_file is None:
+        # Fall back strictly to the global config in the script directory
+        config_file = os.path.join(SCRIPT_DIR, 'parameters.in')
+        
+    config_file = os.path.abspath(config_file)
+    print(f"--> Using configuration file: {config_file}")
+    
     if os.path.exists(config_file):
         try:
             with open(config_file, 'r') as f:
@@ -418,13 +442,19 @@ def load_parameters():
                             defaults[key] = val
         except Exception as e:
             print(f"Warning: Failed to load parameters from {config_file}: {e}")
-    return defaults
+    else:
+        if explicitly_passed:
+            print(f"Error: Specified parameter file '{config_file}' was not found!")
+            sys.exit(1)
+            
+    return defaults, config_file
+
 
 def main():
     print("--- MD Analysis & FEL Automation ---")
     
     # Load default configurations
-    defaults = load_parameters()
+    defaults, config_file = load_parameters()
     
     # Initialize flags defensively to prevent NameError if code flow changes
     has_secstruct = False
@@ -449,9 +479,12 @@ def main():
     rmsd_reference = defaults.get('rmsd_reference', 'average')
     secstruct_res = defaults.get('secstruct_res', '1-auto')
     secstruct_type = defaults.get('secstruct_type', 'total')
+    plot_format_3d = str(defaults.get('plot_format_3d', 'html')).lower().strip()
+    if plot_format_3d not in ['html', 'png', 'both']:
+        plot_format_3d = 'html'
     
     # Get the output directory name first
-    d_dir = defaults.get('output_dir', 'wow')
+    d_dir = defaults.get('output_dir', 'analysis')
     output_dir = safe_input(f"Output directory name [default: {d_dir}]: ").strip()
     if not output_dir:
         output_dir = d_dir
@@ -635,6 +668,10 @@ def main():
     ]
     for i in range(1, 21):
         files_to_clean.append(f"mode{i}.out")
+    if dim == 3:
+        base_3d = f"{var1.lower().strip()}_{var2.lower().strip()}_{var3.lower().strip()}_fel"
+        files_to_clean.append(f"{base_3d}.html")
+        files_to_clean.append(f"{base_3d}.png")
     for f in files_to_clean:
         path = os.path.join(output_dir, f)
         if os.path.exists(path):
@@ -663,7 +700,8 @@ def main():
         'distance1_mask2': distance1_mask2,
         'distance2_mask1': distance2_mask1,
         'distance2_mask2': distance2_mask2,
-        'rmsd_reference': rmsd_reference
+        'rmsd_reference': rmsd_reference,
+        'plot_format_3d': plot_format_3d
     }
 
     # Step 1: Run calculations
@@ -688,19 +726,23 @@ def main():
     print("\n>>> STEP 2: Plotting Free Energy Landscape (FEL) <<<")
     if dim == 1:
         output_image = os.path.join(output_dir, f"{var1.lower().strip()}_fel.png")
-        run_script([sys.executable, os.path.join(SCRIPT_DIR, "plot_fel.py"), data_file1, label1, output_image, "--temp", str(temp)])
+        run_script([sys.executable, os.path.join(SCRIPT_DIR, "plot_fel.py"), data_file1, label1, output_image, "--temp", str(temp), "--config", config_file])
     elif dim == 2:
         output_image = os.path.join(output_dir, f"{var1.lower().strip()}_{var2.lower().strip()}_fel.png")
-        run_script([sys.executable, os.path.join(SCRIPT_DIR, "plot_fel.py"), data_file1, data_file2, label1, label2, output_image, "--temp", str(temp)])
+        run_script([sys.executable, os.path.join(SCRIPT_DIR, "plot_fel.py"), data_file1, data_file2, label1, label2, output_image, "--temp", str(temp), "--config", config_file])
     else:
-        output_image = os.path.join(output_dir, f"{var1.lower().strip()}_{var2.lower().strip()}_{var3.lower().strip()}_fel.html")
-        run_script([sys.executable, os.path.join(SCRIPT_DIR, "plot_fel.py"), data_file1, data_file2, data_file3, label1, label2, label3, output_image, "--temp", str(temp), "--threshold", str(energy_threshold)])
+        ext = ".html" if plot_format_3d in ['html', 'both'] else ".png"
+        output_image = os.path.join(output_dir, f"{var1.lower().strip()}_{var2.lower().strip()}_{var3.lower().strip()}_fel{ext}")
+        run_script([sys.executable, os.path.join(SCRIPT_DIR, "plot_fel.py"), data_file1, data_file2, data_file3, label1, label2, label3, output_image, "--temp", str(temp), "--threshold", str(energy_threshold), "--format", plot_format_3d, "--config", config_file])
     
     # Generate 2D Heatmap if secondary structure analysis was performed
     if has_secstruct:
         plot_dssp_heatmap(output_dir)
         
     print(f"\n[Success] Process completed! Your plot has been created: {output_image}")
+    if dim == 3 and plot_format_3d == 'both':
+        png_output = os.path.splitext(output_image)[0] + ".png"
+        print(f"                                                     and: {png_output}")
 
 if __name__ == "__main__":
     main()
