@@ -519,14 +519,14 @@ def main():
     print("Options: PC1, RMSD, RG, SASA, HBOND, DIHD, DIST, DSSP")
 
     if dim == 1:
-        var1 = safe_input("Variable 1 (e.g., PC1, RMSD): ")
+        var1 = safe_input("Variable 1: ")
     elif dim == 2:
-        var1 = safe_input("Variable 1 (e.g., PC1, RMSD): ")
-        var2 = safe_input("Variable 2 (e.g., PC2, RMSD): ")
+        var1 = safe_input("Variable 1: ")
+        var2 = safe_input("Variable 2: ")
     else:
-        var1 = safe_input("Variable 1 (e.g., PC1, RMSD): ")
-        var2 = safe_input("Variable 2 (e.g., PC2, RMSD): ")
-        var3 = safe_input("Variable 3 (e.g., PC3, Dihedral): ")
+        var1 = safe_input("Variable 1: ")
+        var2 = safe_input("Variable 2: ")
+        var3 = safe_input("Variable 3: ")
 
     # Resolve distance1_mask2 / distance2_mask2 / hbond_mask / dihedral masks if calculations are requested
     vars_to_check = [var1]
