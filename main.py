@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import argparse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -127,7 +128,6 @@ def parse_dssp_time_gnu(gnu_file, sec_type):
 def plot_dssp_heatmap(output_dir):
     try:
         import pandas as pd
-        import seaborn as sns
         import matplotlib.pyplot as plt
         from matplotlib.colors import ListedColormap
         
@@ -203,7 +203,7 @@ def plot_dssp_heatmap(output_dir):
         plt.close()
         print(f"--> DSSP Heatmap saved: {output_image}")
     except ImportError:
-        print("Note: pandas or seaborn not installed. Skipping DSSP Heatmap generation.")
+        print("Note: pandas not installed. Skipping DSSP Heatmap generation.")
     except Exception as e:
         print(f"Warning: Failed to generate DSSP Heatmap: {e}")
 
@@ -360,7 +360,7 @@ def safe_input(prompt):
         # Fallback if stdin buffer is not accessible
         return input().strip()
 
-def load_parameters():
+def load_parameters(config_file=None):
     defaults = {
         'output_dir': 'analysis',
         'dimension': 2,
@@ -394,21 +394,7 @@ def load_parameters():
         'rmsd_reference': 'average'
     }
     
-    config_file = None
-    explicitly_passed = False
-    args = sys.argv[1:]
-    
-    for flag in ["-p", "--params"]:
-        if flag in args:
-            try:
-                idx = args.index(flag)
-                if idx + 1 < len(args):
-                    config_file = args[idx + 1]
-                    explicitly_passed = True
-            except Exception:
-                pass
-            break
-            
+    explicitly_passed = (config_file is not None)
     if config_file is None:
         # Fall back strictly to the global config in the script directory
         config_file = os.path.join(SCRIPT_DIR, 'parameters.in')
@@ -450,12 +436,52 @@ def load_parameters():
     return defaults, config_file
 
 
+def parse_cli_arguments():
+    parser = argparse.ArgumentParser(
+        description="MD Analysis & FEL Automation Pipeline",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("-b", "--batch", action="store_true", help="Enable non-interactive batch mode (bypasses all prompts)")
+    parser.add_argument("-p", "--params", default=None, help="Path to the configuration file (default: parameters.in in script directory)")
+    parser.add_argument("-d", "--dim", type=int, choices=[1, 2, 3], default=None, help="Dimension of the FEL (1, 2, or 3)")
+    parser.add_argument("-t", "--top", default=None, help="Topology file path")
+    parser.add_argument("-x", "--traj", default=None, help="Trajectory list file path")
+    parser.add_argument("-o", "--out", default=None, help="Output directory name")
+    parser.add_argument("--temp", type=float, default=None, help="Simulation temperature in Kelvin")
+    parser.add_argument("--var1", default=None, help="First reaction coordinate/variable")
+    parser.add_argument("--var2", default=None, help="Second reaction coordinate (required for 2D/3D)")
+    parser.add_argument("--var3", default=None, help="Third reaction coordinate (required for 3D)")
+    
+    return parser.parse_args()
+
+
 def main():
     print("--- MD Analysis & FEL Automation ---")
     
-    # Load default configurations
-    defaults, config_file = load_parameters()
+    # Parse CLI arguments
+    cli_args = parse_cli_arguments()
     
+    # Load default configurations
+    defaults, config_file = load_parameters(cli_args.params)
+    
+    # Merge CLI arguments into defaults
+    if cli_args.dim is not None:
+        defaults['dimension'] = cli_args.dim
+    if cli_args.top is not None:
+        defaults['topology'] = cli_args.top
+    if cli_args.traj is not None:
+        defaults['trajectory'] = cli_args.traj
+    if cli_args.out is not None:
+        defaults['output_dir'] = cli_args.out
+    if cli_args.temp is not None:
+        defaults['temperature'] = cli_args.temp
+    if cli_args.var1 is not None:
+        defaults['var1'] = cli_args.var1
+    if cli_args.var2 is not None:
+        defaults['var2'] = cli_args.var2
+    if cli_args.var3 is not None:
+        defaults['var3'] = cli_args.var3
+
     # Initialize flags defensively to prevent NameError if code flow changes
     has_secstruct = False
     
@@ -484,39 +510,58 @@ def main():
         plot_format_3d = 'html'
     
     # Get the output directory name first
-    d_dir = defaults.get('output_dir', 'analysis')
-    output_dir = safe_input(f"Output directory name [default: {d_dir}]: ").strip()
-    if not output_dir:
-        output_dir = d_dir
+    if cli_args.batch:
+        output_dir = defaults.get('output_dir', 'analysis')
+    else:
+        d_dir = defaults.get('output_dir', 'analysis')
+        output_dir = safe_input(f"Output directory name [default: {d_dir}]: ").strip()
+        if not output_dir:
+            output_dir = d_dir
     os.makedirs(output_dir, exist_ok=True)
         
     # Get the dimension selection (1, 2, or 3)
-    d_dim = defaults.get('dimension', 2)
-    dim_str = safe_input(f"Choose dimension (1, 2, or 3) [default: {d_dim}]: ").strip()
-    if not dim_str:
-        dim = d_dim
-    else:
-        try:
-            dim = int(dim_str)
-            if dim not in [1, 2, 3]:
-                raise ValueError
-        except ValueError:
-            print("Error: Dimension must be 1, 2, or 3!")
+    if cli_args.batch:
+        dim = defaults.get('dimension', 2)
+        if dim not in [1, 2, 3]:
+            print(f"Error: Invalid dimension '{dim}' in batch mode! Must be 1, 2, or 3.")
             sys.exit(1)
+    else:
+        d_dim = defaults.get('dimension', 2)
+        dim_str = safe_input(f"Choose dimension (1, 2, or 3) [default: {d_dim}]: ").strip()
+        if not dim_str:
+            dim = d_dim
+        else:
+            try:
+                dim = int(dim_str)
+                if dim not in [1, 2, 3]:
+                    raise ValueError
+            except ValueError:
+                print("Error: Dimension must be 1, 2, or 3!")
+                sys.exit(1)
             
     # Get the temperature (default: 310 K)
-    d_temp = defaults.get('temperature', 310.0)
-    temp_str = safe_input(f"Temperature in Kelvin [default: {d_temp}]: ").strip()
-    if not temp_str:
-        temp = d_temp
-    else:
+    if cli_args.batch:
+        temp = defaults.get('temperature', 310.0)
         try:
-            temp = float(temp_str)
+            temp = float(temp)
             if temp <= 0:
                 raise ValueError
         except ValueError:
-            print("Error: Temperature must be a positive number!")
+            print(f"Error: Temperature must be a positive number (got '{temp}')!")
             sys.exit(1)
+    else:
+        d_temp = defaults.get('temperature', 310.0)
+        temp_str = safe_input(f"Temperature in Kelvin [default: {d_temp}]: ").strip()
+        if not temp_str:
+            temp = d_temp
+        else:
+            try:
+                temp = float(temp_str)
+                if temp <= 0:
+                    raise ValueError
+            except ValueError:
+                print("Error: Temperature must be a positive number!")
+                sys.exit(1)
 
     # For 3D, get the energy threshold silently from parameters.in (default: auto)
     energy_threshold = "auto"
@@ -535,31 +580,87 @@ def main():
                 sys.exit(1)
     
     # Get inputs from the user (Interactive Menu)
-    d_top = defaults.get('topology', '')
-    prompt_top = f" [default: {d_top}]" if d_top else ""
-    topology = safe_input(f"Topology file path{prompt_top}: ").strip()
-    if not topology:
-        topology = d_top
+    if cli_args.batch:
+        topology = defaults.get('topology', '')
+        if not topology:
+            print("Error: Topology file path must be specified in batch mode (via CLI or config file)!")
+            sys.exit(1)
+    else:
+        d_top = defaults.get('topology', '')
+        prompt_top = f" [default: {d_top}]" if d_top else ""
+        topology = safe_input(f"Topology file path{prompt_top}: ").strip()
+        if not topology:
+            topology = d_top
     check_file(topology, "Topology file")
     
-    d_traj = defaults.get('trajectory', '')
-    prompt_traj = f" [default: {d_traj}]" if d_traj else ""
-    traj_list = safe_input(f"Trajectory list file path{prompt_traj}: ").strip()
-    if not traj_list:
-        traj_list = d_traj
+    if cli_args.batch:
+        traj_list = defaults.get('trajectory', '')
+        if not traj_list:
+            print("Error: Trajectory list file path must be specified in batch mode (via CLI or config file)!")
+            sys.exit(1)
+    else:
+        d_traj = defaults.get('trajectory', '')
+        prompt_traj = f" [default: {d_traj}]" if d_traj else ""
+        traj_list = safe_input(f"Trajectory list file path{prompt_traj}: ").strip()
+        if not traj_list:
+            traj_list = d_traj
     check_file(traj_list, "Trajectory list file")
     
-    print("Options: PC1, RMSD, RG, SASA, HBOND, DIHD, DIST, DSSP")
-
-    if dim == 1:
-        var1 = safe_input("Variable 1: ")
-    elif dim == 2:
-        var1 = safe_input("Variable 1: ")
-        var2 = safe_input("Variable 2: ")
+    if cli_args.batch:
+        var1 = defaults.get('var1', '')
+        if not var1:
+            print("Error: Variable 1 must be specified in batch mode!")
+            sys.exit(1)
+        var2 = defaults.get('var2', '') if dim >= 2 else None
+        if dim >= 2 and not var2:
+            print("Error: Variable 2 must be specified in batch mode for dimension >= 2!")
+            sys.exit(1)
+        var3 = defaults.get('var3', '') if dim == 3 else None
+        if dim == 3 and not var3:
+            print("Error: Variable 3 must be specified in batch mode for dimension 3!")
+            sys.exit(1)
     else:
-        var1 = safe_input("Variable 1: ")
-        var2 = safe_input("Variable 2: ")
-        var3 = safe_input("Variable 3: ")
+        print("Options: PC1, RMSD, RG, SASA, HBOND, DIHD, DIST, DSSP")
+        d_var1 = defaults.get('var1', '')
+        d_var2 = defaults.get('var2', '')
+        d_var3 = defaults.get('var3', '')
+        
+        prompt_var1 = f" [default: {d_var1}]" if d_var1 else ""
+        prompt_var2 = f" [default: {d_var2}]" if d_var2 else ""
+        prompt_var3 = f" [default: {d_var3}]" if d_var3 else ""
+        
+        if dim == 1:
+            var1 = safe_input(f"Variable 1{prompt_var1}: ").strip()
+            if not var1:
+                var1 = d_var1
+        elif dim == 2:
+            var1 = safe_input(f"Variable 1{prompt_var1}: ").strip()
+            if not var1:
+                var1 = d_var1
+            var2 = safe_input(f"Variable 2{prompt_var2}: ").strip()
+            if not var2:
+                var2 = d_var2
+        else:
+            var1 = safe_input(f"Variable 1{prompt_var1}: ").strip()
+            if not var1:
+                var1 = d_var1
+            var2 = safe_input(f"Variable 2{prompt_var2}: ").strip()
+            if not var2:
+                var2 = d_var2
+            var3 = safe_input(f"Variable 3{prompt_var3}: ").strip()
+            if not var3:
+                var3 = d_var3
+                
+        # Validate that variables are not empty
+        if not var1:
+            print("Error: Variable 1 cannot be empty!")
+            sys.exit(1)
+        if dim >= 2 and not var2:
+            print("Error: Variable 2 cannot be empty!")
+            sys.exit(1)
+        if dim == 3 and not var3:
+            print("Error: Variable 3 cannot be empty!")
+            sys.exit(1)
 
     # Resolve distance1_mask2 / distance2_mask2 / hbond_mask / dihedral masks if calculations are requested
     vars_to_check = [var1]
